@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mê Cung Thần Linh</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#f1eee6;--fg:#1d1b22;--card:#fff;--ac:#a8740a;--mut:#6b6676}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0c0e1a;--fg:#ece9f5;--card:#171a2d;--ac:#f5c542;--mut:#9b97ad}}
+:root[data-theme="dark"]{--bg:#0c0e1a;--fg:#ece9f5;--card:#171a2d;--ac:#f5c542;--mut:#9b97ad}
+*{box-sizing:border-box}html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,"Segoe UI",sans-serif}
+.v{max-width:560px;margin:0 auto;padding:16px}.hide{display:none!important}
+h1{font-size:1.3rem;margin:6px 0 12px}
+button{background:var(--ac);color:#111;border:0;border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer;font-size:.9rem}
+button.g{background:var(--card);color:var(--fg);border:1px solid var(--mut)}button[disabled]{opacity:.5}
+input,textarea{width:100%;border-radius:8px;border:1px solid var(--mut);padding:9px;background:var(--card);color:var(--fg);font:inherit}
+.row{display:flex;gap:8px;margin:8px 0}.item{background:var(--card);border-radius:10px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;margin:6px 0}
+small{color:var(--mut)}
+#game{position:fixed;inset:0;background:#05060c}#c{width:100%;height:100%;display:block;touch-action:none}
+#hud{position:absolute;left:0;right:0;top:env(safe-area-inset-top,0px);padding:8px 12px;color:#fff;font-size:.85rem;pointer-events:none;text-shadow:0 1px 3px #000}
+#log div{opacity:.9;margin-top:2px}
+#pz,#lw,#end{position:absolute;left:50%;transform:translateX(-50%);background:#171a2de8;color:#ece9f5;border-radius:14px;padding:14px;width:min(92vw,420px)}
+#pz{bottom:calc(16px + env(safe-area-inset-bottom,0px))}#lw,#end{top:30%}
+#cip{font:700 1.4rem ui-monospace,monospace;letter-spacing:.1em;color:#f5c542;margin:6px 0;word-break:break-word}
+#sc{position:absolute;right:12px;bottom:calc(16px + env(safe-area-inset-bottom,0px))}
+</style></head><body>
+<div id="lobby" class="v"><h1>✦ Mê Cung Thần Linh</h1>
+<small>Mỗi phòng tối đa 4 người. Cùng giải mật thư, thoát khỏi quái vật!</small>
+<div class="row"><input id="nm" maxlength="14" placeholder="Tên của bạn"><button id="sv" class="g">Lưu</button></div>
+<div class="row"><input id="rn" maxlength="20" placeholder="Tên phòng mới"><button id="cr">Tạo phòng</button></div>
+<div id="rl"></div><div id="er" style="color:#e0524d;font-size:.85rem"></div></div>
+<div id="room" class="v hide"><h1 id="rt"></h1><div id="pl"></div>
+<div class="row"><button id="st">Bắt đầu</button><button id="lv" class="g">Rời phòng</button></div><small id="hn"></small></div>
+<div id="game" class="hide"><canvas id="c"></canvas>
+<div id="hud"><div id="info"></div><div id="log"></div></div>
+<div id="pz" class="hide"><small>Mật thư: mỗi chữ cái bị dời <b id="kk"></b> bậc trong bảng chữ cái. Gõ lại câu gốc (không dấu).</small>
+<div id="cip"></div><div class="row"><input id="an" autocomplete="off" placeholder="Câu gốc…"><button id="go">Gửi</button><button id="xp" class="g">Đóng</button></div><small id="bad" style="color:#e0524d"></small></div>
+<button id="sc" class="hide">📜 Giấy cuộn</button>
+<div id="lw" class="hide"><b>Giấy cuộn ban phước</b><br><small>Viết một luật cho riêng bạn trong ván này (không tác động tới quái vật). Ví dụ: "Gió nâng bước chân ta".</small>
+<textarea id="lt" maxlength="160" rows="3"></textarea><div class="row"><button id="lo">Ban luật</button><button id="lx" class="g">Để sau</button></div><small id="ls"></small></div>
+<div id="end" class="hide"><b id="et"></b><p id="eb"></p><button id="eo">Về phòng chờ</button></div></div>
+<script>
+const $=id=>document.getElementById(id);let ws,me=0,view='lobby',room=null,maze=null,notes=[],ex=null,S={},ent={},scrolls=0,law=null,myName=localStorage.getItem('nm')||'';
+$('nm').value=myName;
+function show(v){view=v;['lobby','room','game'].forEach(k=>$(k).classList.toggle('hide',k!==v))}
+function conn(){ws=new WebSocket((location.protocol=='https:'?'wss://':'ws://')+location.host);
+ws.onopen=()=>{if(myName)snd({t:'name',name:myName})};ws.onclose=()=>{$('er').textContent='Mất kết nối, đang thử lại…';setTimeout(conn,2000)};
+ws.onmessage=e=>on(JSON.parse(e.data))}
+const snd=o=>ws.readyState==1&&ws.send(JSON.stringify(o));
+function on(m){
+if(m.t=='hi'){me=m.id;$('er').textContent='';rooms(m.rooms)}
+else if(m.t=='lobby'){room=null;if(view!='game'||!maze)show('lobby');rooms(m.rooms)}
+else if(m.t=='err')$('er').textContent=m.m
+else if(m.t=='room'){room=m;{if(view!='game')show('room');$('rt').textContent=m.name;
+$('pl').innerHTML='';m.players.forEach(p=>{const d=document.createElement('div');d.className='item';d.textContent=p.name+(p.id==m.host?' (chủ phòng)':'')+(p.id==me?' — bạn':'');$('pl').append(d)});
+$('st').classList.toggle('hide',m.host!=me);$('hn').textContent=m.host==me?'Bạn là chủ phòng, bấm Bắt đầu khi sẵn sàng.':'Chờ chủ phòng bắt đầu…'}}
+else if(m.t=='start'){maze=m.maze;notes=m.notes.map(n=>({...n,done:false}));ex=m.exit;ent={};S={};scrolls=0;law=null;
+$('log').innerHTML='';$('pz').classList.add('hide');$('end').classList.add('hide');$('lw').classList.add('hide');upSc();show('game');rs()}
+else if(m.t=='s'){S=m;notes.forEach(n=>n.done=m.nd.includes(n.id));
+m.p.forEach(p=>{const e=ent[p.i]||(ent[p.i]={x:p.x,y:p.y});e.tx=p.x;e.ty=p.y;e.a=p.a;e.e=p.e});
+const e=ent.m||(ent.m={x:m.m.x,y:m.m.y});e.tx=m.m.x;e.ty=m.m.y}
+else if(m.t=='ev'){toast(m.m)}
+else if(m.t=='puz'){$('cip').textContent=m.c;$('kk').textContent=m.k;$('bad').textContent='';$('an').value='';pn=m.n;$('pz').classList.remove('hide');$('an').focus()}
+else if(m.t=='ans'){if(m.ok)$('pz').classList.add('hide');else $('bad').textContent='Chưa đúng, thử lại!'}
+else if(m.t=='scroll'){scrolls=m.n;upSc()}
+else if(m.t=='law'){law=m.law;$('lw').classList.add('hide');toast('Thiên Đạo: '+m.law.lore)}
+else if(m.t=='end'){$('et').textContent=m.esc.length?'Thoát thành công!':'Quái vật đã thắng…';
+$('eb').textContent=(m.esc.length?'Thoát: '+m.esc.join(', ')+'. ':'')+(m.dead.length?'Bị bắt: '+m.dead.join(', ')+'.':'');$('end').classList.remove('hide')}}
+let pn=0;
+function rooms(l){const b=$('rl');b.innerHTML='';if(!l.length){b.innerHTML='<small>Chưa có phòng nào. Hãy tạo phòng đầu tiên!</small>';return}
+l.forEach(r=>{const d=document.createElement('div');d.className='item';const s=document.createElement('span');s.textContent=r.name+' · '+r.n+'/4 '+(r.st=='playing'?'(đang chơi)':'');
+const j=document.createElement('button');j.textContent='Vào';j.disabled=r.n>=4||r.st!='waiting';j.onclick=()=>snd({t:'join',id:r.id});d.append(s,j);b.append(d)})}
+function toast(t){const d=document.createElement('div');d.textContent=t;$('log').append(d);while($('log').children.length>5)$('log').firstChild.remove();setTimeout(()=>d.remove(),7000)}
+function upSc(){$('sc').classList.toggle('hide',scrolls<1);$('sc').textContent='📜 Giấy cuộn ×'+scrolls}
+$('sv').onclick=()=>{myName=$('nm').value.trim();localStorage.setItem('nm',myName);snd({t:'name',name:myName})};
+$('cr').onclick=()=>{$('sv').onclick();snd({t:'create',name:$('rn').value})};
+$('st').onclick=()=>snd({t:'start'});$('lv').onclick=()=>snd({t:'leave'});
+$('go').onclick=()=>snd({t:'ans',n:pn,text:$('an').value});$('an').onkeydown=e=>{if(e.key=='Enter')$('go').onclick()};
+$('xp').onclick=()=>{$('pz').classList.add('hide');snd({t:'closepuz'})};
+$('sc').onclick=()=>{$('ls').textContent='';$('lw').classList.remove('hide');$('lt').focus()};
+$('lx').onclick=()=>$('lw').classList.add('hide');
+$('lo').onclick=()=>{const t=$('lt').value.trim();if(!t)return;$('ls').textContent='Thiên Đạo đang cân nhắc…';snd({t:'law',text:t});$('lt').value=''};
+$('eo').onclick=()=>{$('end').classList.add('hide');maze=null;show('room')};
+// điều khiển
+const cv=$('c'),cx=cv.getContext('2d');let W=0,H=0,keys={},ptr=null,last='';
+function rs(){const r=cv.getBoundingClientRect(),d=devicePixelRatio||1;W=r.width;H=r.height;cv.width=W*d;cv.height=H*d;cx.setTransform(d,0,0,d,0,0)}
+addEventListener('resize',rs);
+const typing=()=>/INPUT|TEXTAREA/.test(document.activeElement.tagName);
+addEventListener('keydown',e=>{if(!typing())keys[e.key.toLowerCase()]=1});addEventListener('keyup',e=>delete keys[e.key.toLowerCase()]);
+const pm=e=>{ptr={x:e.clientX-W/2,y:e.clientY-H/2}};cv.addEventListener('pointerdown',pm);cv.addEventListener('pointermove',e=>{if(ptr)pm(e)});
+addEventListener('pointerup',()=>ptr=null);
+setInterval(()=>{if(view!='game')return;let x=(keys.d||keys.arrowright?1:0)-(keys.a||keys.arrowleft?1:0),y=(keys.s||keys.arrowdown?1:0)-(keys.w||keys.arrowup?1:0);
+if(!x&&!y&&ptr){const l=Math.hypot(ptr.x,ptr.y);if(l>14){x=ptr.x/l;y=ptr.y/l}}
+const k=x.toFixed(2)+','+y.toFixed(2);if(k!=last){last=k;snd({t:'in',x,y})}},50);
+// vẽ
+const L=(a,b)=>a+(b-a)*0.3;
+function me_(){return S.p&&S.p.find(p=>p.i==me)}
+function frame(){requestAnimationFrame(frame);if(view!='game'||!maze||!S.p)return;
+for(const k in ent){const e=ent[k];e.x=L(e.x,e.tx);e.y=L(e.y,e.ty)}
+const mp=me_(),alive=mp&&mp.a&&!mp.e;let fo=alive?mp:S.p.find(p=>p.a&&!p.e)||mp,f=ent[fo.i],T=Math.min(W,H)/10,ox=W/2-f.x*T,oy=H/2-f.y*T;
+cx.fillStyle='#05060c';cx.fillRect(0,0,W,H);
+const x0=Math.max(0,Math.floor(f.x-W/T/2-1)),x1=Math.min(maze.length-1,Math.ceil(f.x+W/T/2+1)),y0=Math.max(0,Math.floor(f.y-H/T/2-1)),y1=Math.min(maze.length-1,Math.ceil(f.y+H/T/2+1));
+for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){cx.fillStyle=maze[y][x]=='#'?'#2b2f4a':'#16192c';cx.fillRect(ox+x*T,oy+y*T,T+1,T+1)}
+const tm=Date.now()/300;
+notes.forEach(n=>{if(n.done)return;cx.fillStyle='#f5c542';cx.fillRect(ox+n.x*T-T*.22,oy+n.y*T-T*.28,T*.44,T*.56);cx.fillStyle='#8a6a10';for(let i=0;i<3;i++)cx.fillRect(ox+n.x*T-T*.15,oy+n.y*T-T*.18+i*T*.15,T*.3,2)});
+cx.fillStyle=S.o?'#3ddc84':'#6b2a2a';cx.fillRect(ox+(ex.x-.4)*T,oy+(ex.y-.4)*T,T*.8,T*.8);
+S.p.forEach(p=>{const e=ent[p.i];if(p.e)return;cx.globalAlpha=p.a?1:.25;cx.fillStyle=p.i==me?'#5ee0ff':'#b99cff';cx.beginPath();cx.arc(ox+e.x*T,oy+e.y*T,T*.28,0,7);cx.fill();cx.globalAlpha=1});
+const m=ent.m;cx.fillStyle='#e0524d';cx.shadowColor='#e0524d';cx.shadowBlur=20;cx.beginPath();cx.arc(ox+m.x*T,oy+m.y*T,T*.36+Math.sin(tm)*2,0,7);cx.fill();cx.shadowBlur=0;
+const vis=(3.2+(law&&law.effect=='vision'?law.level*1.3:0))*T,g=cx.createRadialGradient(W/2,H/2,vis*.45,W/2,H/2,vis*1.25);
+g.addColorStop(0,'rgba(3,4,10,0)');g.addColorStop(1,'rgba(3,4,10,.985)');cx.fillStyle=g;cx.fillRect(0,0,W,H);
+if(law&&law.effect=='radar'){const dx=m.x-f.x,dy=m.y-f.y,d=Math.hypot(dx,dy);if(d<4+law.level*2.5&&d>vis/T){const a=Math.atan2(dy,dx),R=Math.min(W,H)*.36;cx.fillStyle='rgba(224,82,77,'+(.5+.4*Math.sin(tm*2))+')';cx.beginPath();cx.arc(W/2+Math.cos(a)*R,H/2+Math.sin(a)*R,9,0,7);cx.fill()}}
+const al=S.p.filter(p=>p.a&&!p.e).length;
+$('info').innerHTML='🗝 '+S.k+'/3 · '+(S.o?'<b style="color:#3ddc84">Cửa thoát đã mở!</b>':'Cửa thoát: đóng')+' · Còn sống: '+al+(S.w?' · <b>Quái vật thức dậy sau vài giây…</b>':'')+(alive?'':' · <b>Bạn đã ra khỏi cuộc chơi (đang xem)</b>')+(law?'<br>Luật: '+law.name+' (cấp '+law.level+')':'')}
+conn();frame();
+</script></body></html>
